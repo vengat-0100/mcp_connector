@@ -23,6 +23,7 @@ async function callRemoteMcp(
 	config: import("./config").ConnectorConfig,
 	params?: unknown,
 ): Promise<unknown> {
+	console.log(`Calling remote MCP at ${mcpEndpointUrl} with method ${method} and params`, params);
 	const res = await fetch(mcpEndpointUrl, {
 		method: "POST",
 		headers: {
