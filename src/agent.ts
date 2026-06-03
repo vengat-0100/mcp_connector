@@ -7,9 +7,10 @@ import { log } from "node:console";
 
 type OidcProps = { sessionId: string };
 
-// POST a JSON-RPC request to the remote MCP server and return the result.
-// Handles both plain JSON and SSE (text/event-stream) responses.
-function buildAuthHeader(config: { drupalUsername: string; drupalPassword: string }, accessToken: string): string {
+function buildAuthHeader(
+	config: { drupalUsername: string; drupalPassword: string },
+	accessToken: string,
+): string {
 	if (config.drupalUsername && config.drupalPassword) {
 		const encoded = btoa(`${config.drupalUsername}:${config.drupalPassword}`);
 		return `Basic ${encoded}`;
@@ -17,28 +18,33 @@ function buildAuthHeader(config: { drupalUsername: string; drupalPassword: strin
 	return `Bearer ${accessToken}`;
 }
 
+// ─── FIXED: callRemoteMcp ───────────────────────────────────────────────────
+// Key changes:
+//   1. Accepts an explicit `id` so the JSON-RPC id is never hardcoded.
+//   2. Returns data.result (unchanged) — the McpServer SDK wraps this itself.
+//   3. Uses buildAuthHeader so Basic/Bearer auth is selected from config.
 async function callRemoteMcp(
 	mcpEndpointUrl: string,
 	accessToken: string,
 	method: string,
 	config: import("./config").ConnectorConfig,
+	id: string | number,      // ← NEW: caller supplies the id
 	params?: unknown,
 ): Promise<unknown> {
 	console.log(`Calling remote MCP at ${mcpEndpointUrl} with method ${method} and params`, params);
+
 	const res = await fetch(mcpEndpointUrl, {
 		method: "POST",
 		headers: {
-			// Authorization: buildAuthHeader(config, accessToken),
-			Authorization: "Basic YWRtaW46YWRtaW5AMTIz",
+			Authorization: buildAuthHeader(config, accessToken), // ← uses config, not hardcoded
 			"Content-Type": "application/json",
 			Accept: "application/json, text/event-stream",
 		},
 		body: JSON.stringify({
 			jsonrpc: "2.0",
-			// id: crypto.randomUUID(),
-			id: 1,
-			"method" : method,
-			"params" : params ?? {},
+			id,           // ← forwarded from caller, never hardcoded
+			method,
+			params: params ?? {},
 		}),
 		signal: AbortSignal.timeout(15000),
 	});
@@ -52,6 +58,7 @@ async function callRemoteMcp(
 
 	if (contentType.includes("text/event-stream")) {
 		const text = await res.text();
+		console.log("SSE raw:", text.slice(0, 300));
 		const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
 		if (!dataLine) throw new Error("Empty SSE response from MCP server");
 		data = JSON.parse(dataLine.slice(6));
@@ -60,11 +67,14 @@ async function callRemoteMcp(
 	}
 
 	if (data.error) {
-		throw new Error(data.error.message ?? "MCP server error");
+		throw new Error((data.error as { message?: string }).message ?? "MCP server error");
 	}
+
 	log("Received response from MCP server:", data);
-	return data.result;
+	return data.result; // McpServer SDK expects just the result, not the full envelope
 }
+
+// ─── AGENT ──────────────────────────────────────────────────────────────────
 
 export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, OidcProps> {
 	server = new McpServer({
@@ -107,7 +117,6 @@ export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, Oidc
 			}
 		}
 
-		// Helper: returns OIDC access token, or empty string when Basic auth handles the call.
 		const getAccessToken = async (cfg: typeof config): Promise<string> => {
 			if (cfg.drupalUsername && cfg.drupalPassword) return "";
 			const tokens = await getValidTokens(kv, sessionId, cfg);
@@ -116,13 +125,23 @@ export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, Oidc
 
 		this.server.server.registerCapabilities({ tools: {} });
 
-		this.server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+		// ─── FIXED: tools/list ───────────────────────────────────────────────
+		// Pass request.id so the JSON-RPC id is forwarded correctly to Drupal.
+		this.server.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
 			const cfg = await readConfig(kv);
 			const accessToken = await getAccessToken(cfg);
-			const result = await callRemoteMcp(cfg.mcpEndpointUrl, accessToken, "tools/list", cfg);
+			const result = await callRemoteMcp(
+				cfg.mcpEndpointUrl,
+				accessToken,
+				"tools/list",
+				cfg,
+				request.id,   // ← forward the SDK's request id
+			);
 			return result as { tools: unknown[] };
 		});
 
+		// ─── FIXED: tools/call ───────────────────────────────────────────────
+		// Same fix: forward request.id and pass request.params directly.
 		this.server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 			const cfg = await readConfig(kv);
 			const accessToken = await getAccessToken(cfg);
@@ -131,6 +150,7 @@ export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, Oidc
 				accessToken,
 				"tools/call",
 				cfg,
+				request.id,        // ← forward the SDK's request id
 				request.params,
 			);
 			return result as { content: unknown[] };
