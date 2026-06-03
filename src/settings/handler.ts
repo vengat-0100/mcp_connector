@@ -34,6 +34,9 @@ app.post("/setup", async (c) => {
 	const rawSecret = (form.get("clientSecret") as string) ?? "";
 	const clientSecret = rawSecret === SECRET_PLACEHOLDER ? existing.clientSecret : rawSecret;
 
+	const rawDrupalPassword = (form.get("drupalPassword") as string) ?? "";
+	const drupalPassword = rawDrupalPassword === SECRET_PLACEHOLDER ? existing.drupalPassword : rawDrupalPassword;
+
 	const updated: ConnectorConfig = {
 		siteUrl: ((form.get("siteUrl") as string) ?? "").trim(),
 		mcpEndpointUrl: ((form.get("mcpEndpointUrl") as string) ?? "").trim(),
@@ -46,6 +49,8 @@ app.post("/setup", async (c) => {
 		clientId: ((form.get("clientId") as string) ?? "").trim(),
 		clientSecret,
 		scopes: ((form.get("scopes") as string) ?? "openid profile email").trim(),
+		drupalUsername: ((form.get("drupalUsername") as string) ?? "").trim(),
+		drupalPassword,
 		setupDone: true,
 		savedAt: new Date().toISOString(),
 	};
@@ -115,6 +120,9 @@ app.post("/settings", async (c) => {
 	const rawSecret = (form.get("clientSecret") as string) ?? "";
 	const clientSecret = rawSecret === SECRET_PLACEHOLDER ? existing.clientSecret : rawSecret;
 
+	const rawDrupalPassword = (form.get("drupalPassword") as string) ?? "";
+	const drupalPassword = rawDrupalPassword === SECRET_PLACEHOLDER ? existing.drupalPassword : rawDrupalPassword;
+
 	const updated: ConnectorConfig = {
 		siteUrl: ((form.get("siteUrl") as string) ?? "").trim(),
 		mcpEndpointUrl: ((form.get("mcpEndpointUrl") as string) ?? "").trim(),
@@ -127,6 +135,8 @@ app.post("/settings", async (c) => {
 		clientId: ((form.get("clientId") as string) ?? "").trim(),
 		clientSecret,
 		scopes: ((form.get("scopes") as string) ?? "openid profile email").trim(),
+		drupalUsername: ((form.get("drupalUsername") as string) ?? "").trim(),
+		drupalPassword,
 		setupDone: true,
 		savedAt: new Date().toISOString(),
 	};

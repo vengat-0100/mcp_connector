@@ -8,16 +8,25 @@ type OidcProps = { sessionId: string };
 
 // POST a JSON-RPC request to the remote MCP server and return the result.
 // Handles both plain JSON and SSE (text/event-stream) responses.
+function buildAuthHeader(config: { drupalUsername: string; drupalPassword: string }, accessToken: string): string {
+	if (config.drupalUsername && config.drupalPassword) {
+		const encoded = btoa(`${config.drupalUsername}:${config.drupalPassword}`);
+		return `Basic ${encoded}`;
+	}
+	return `Bearer ${accessToken}`;
+}
+
 async function callRemoteMcp(
 	mcpEndpointUrl: string,
 	accessToken: string,
 	method: string,
+	config: import("./config").ConnectorConfig,
 	params?: unknown,
 ): Promise<unknown> {
 	const res = await fetch(mcpEndpointUrl, {
 		method: "POST",
 		headers: {
-			Authorization: `Bearer ${accessToken}`,
+			Authorization: buildAuthHeader(config, accessToken),
 			"Content-Type": "application/json",
 			Accept: "application/json, text/event-stream",
 		},
@@ -95,7 +104,7 @@ export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, Oidc
 		this.server.server.setRequestHandler(ListToolsRequestSchema, async () => {
 			const cfg = await readConfig(kv);
 			const tokens = await getValidTokens(kv, sessionId, cfg);
-			const result = await callRemoteMcp(cfg.mcpEndpointUrl, tokens.accessToken, "tools/list");
+			const result = await callRemoteMcp(cfg.mcpEndpointUrl, tokens.accessToken, "tools/list", cfg);
 			return result as { tools: unknown[] };
 		});
 
@@ -106,6 +115,7 @@ export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, Oidc
 				cfg.mcpEndpointUrl,
 				tokens.accessToken,
 				"tools/call",
+				cfg,
 				request.params,
 			);
 			return result as { content: unknown[] };

@@ -10,6 +10,8 @@ export interface ConnectorConfig {
 	clientId: string;
 	clientSecret: string;
 	scopes: string;
+	drupalUsername: string;
+	drupalPassword: string;
 	setupDone: boolean;
 	savedAt?: string;
 }
@@ -26,6 +28,8 @@ export const DEFAULT_CONFIG: ConnectorConfig = {
 	clientId: "",
 	clientSecret: "",
 	scopes: "openid profile email",
+	drupalUsername: "",
+	drupalPassword: "",
 	setupDone: false,
 };
 
