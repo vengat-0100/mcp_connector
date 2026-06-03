@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { readConfig } from "./config";
 import { getValidTokens } from "./oidc-handler";
+import { log } from "node:console";
 
 type OidcProps = { sessionId: string };
 
@@ -61,6 +62,7 @@ async function callRemoteMcp(
 	if (data.error) {
 		throw new Error(data.error.message ?? "MCP server error");
 	}
+	log("Received response from MCP server:", data);
 	return data.result;
 }
 
