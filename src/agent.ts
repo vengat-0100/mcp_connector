@@ -36,6 +36,7 @@ async function callRemoteMcp(
 			method,
 			params,
 		}),
+		signal: AbortSignal.timeout(15000),
 	});
 
 	if (!res.ok) {
@@ -87,33 +88,42 @@ export class McpConnectorAgent extends McpAgent<Env, Record<string, never>, Oidc
 			return;
 		}
 
-		try {
-			await getValidTokens(kv, sessionId, config);
-		} catch {
-			this.server.tool("session_expired", "Session expired — reconnect to re-authenticate", {}, async () => ({
-				content: [{ type: "text", text: "Session expired. Disconnect and reconnect to the MCP server to re-authenticate." }],
-				isError: true,
-			}));
-			return;
+		const usesBasicAuth = !!(config.drupalUsername && config.drupalPassword);
+
+		if (!usesBasicAuth) {
+			try {
+				await getValidTokens(kv, sessionId, config);
+			} catch {
+				this.server.tool("session_expired", "Session expired — reconnect to re-authenticate", {}, async () => ({
+					content: [{ type: "text", text: "Session expired. Disconnect and reconnect to the MCP server to re-authenticate." }],
+					isError: true,
+				}));
+				return;
+			}
 		}
 
-		// Re-fetch config + tokens on every request so settings changes take effect
-		// and tokens are always fresh.
+		// Helper: returns OIDC access token, or empty string when Basic auth handles the call.
+		const getAccessToken = async (cfg: typeof config): Promise<string> => {
+			if (cfg.drupalUsername && cfg.drupalPassword) return "";
+			const tokens = await getValidTokens(kv, sessionId, cfg);
+			return tokens.accessToken;
+		};
+
 		this.server.server.registerCapabilities({ tools: {} });
 
 		this.server.server.setRequestHandler(ListToolsRequestSchema, async () => {
 			const cfg = await readConfig(kv);
-			const tokens = await getValidTokens(kv, sessionId, cfg);
-			const result = await callRemoteMcp(cfg.mcpEndpointUrl, tokens.accessToken, "tools/list", cfg);
+			const accessToken = await getAccessToken(cfg);
+			const result = await callRemoteMcp(cfg.mcpEndpointUrl, accessToken, "tools/list", cfg);
 			return result as { tools: unknown[] };
 		});
 
 		this.server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 			const cfg = await readConfig(kv);
-			const tokens = await getValidTokens(kv, sessionId, cfg);
+			const accessToken = await getAccessToken(cfg);
 			const result = await callRemoteMcp(
 				cfg.mcpEndpointUrl,
-				tokens.accessToken,
+				accessToken,
 				"tools/call",
 				cfg,
 				request.params,
