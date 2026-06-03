@@ -1,98 +1,46 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpAgent } from "agents/mcp";
-import { Octokit } from "octokit";
-import { z } from "zod";
-import { GitHubHandler } from "./github-handler";
+import { Hono } from "hono";
+import { McpConnectorAgent } from "./agent";
+import { OidcHandler } from "./oidc-handler";
+import { SettingsHandler } from "./settings/handler";
 
-// Context from the auth process, encrypted & stored in the auth token
-// and provided to the DurableMCP as this.props
-type Props = {
-	login: string;
-	name: string;
-	email: string;
-	accessToken: string;
-};
+export { McpConnectorAgent };
 
-const ALLOWED_USERNAMES = new Set<string>([
-	// Add GitHub usernames of users who should have access to the image generation tool
-	// For example: 'yourusername', 'coworkerusername'
-]);
+const app = new Hono<{ Bindings: Env }>();
 
-export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
-	server = new McpServer({
-		name: "Github OAuth Proxy Demo",
-		version: "1.0.0",
-	});
+app.get("/", (c) => {
+	const mcpUrl = new URL("/mcp", c.req.url).href;
+	return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Connector</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 4rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .url-box { background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem 1rem; font-family: monospace; margin: 1rem 0; word-break: break-all; }
+    a { color: #0070f3; }
+  </style>
+</head>
+<body>
+  <h1>MCP Connector</h1>
+  <p>Your MCP server URL:</p>
+  <div class="url-box">${mcpUrl}</div>
+  <p>Add this URL to <strong>Claude.ai → Settings → Integrations</strong>.</p>
+  <p><a href="/settings">Open Settings →</a></p>
+</body>
+</html>`);
+});
 
-	async init() {
-		// Hello, world!
-		this.server.tool(
-			"add",
-			"Add two numbers the way only MCP can",
-			{ a: z.number(), b: z.number() },
-			async ({ a, b }) => ({
-				content: [{ text: String(a + b), type: "text" }],
-			}),
-		);
-
-		// Use the upstream access token to facilitate tools
-		this.server.tool(
-			"userInfoOctokit",
-			"Get user info from GitHub, via Octokit",
-			{},
-			async () => {
-				const octokit = new Octokit({ auth: this.props!.accessToken });
-				return {
-					content: [
-						{
-							text: JSON.stringify(await octokit.rest.users.getAuthenticated()),
-							type: "text",
-						},
-					],
-				};
-			},
-		);
-
-		// Dynamically add tools based on the user's login. In this case, I want to limit
-		// access to my Image Generation tool to just me
-		if (ALLOWED_USERNAMES.has(this.props!.login)) {
-			this.server.tool(
-				"generateImage",
-				"Generate an image using the `flux-1-schnell` model. Works best with 8 steps.",
-				{
-					prompt: z
-						.string()
-						.describe("A text description of the image you want to generate."),
-					steps: z
-						.number()
-						.min(4)
-						.max(8)
-						.default(4)
-						.describe(
-							"The number of diffusion steps; higher values can improve quality but take longer. Must be between 4 and 8, inclusive.",
-						),
-				},
-				async ({ prompt, steps }) => {
-					const response = await this.env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
-						prompt,
-						steps,
-					});
-
-					return {
-						content: [{ data: response.image!, mimeType: "image/jpeg", type: "image" }],
-					};
-				},
-			);
-		}
-	}
-}
+app.route("/", SettingsHandler);
+app.route("/", OidcHandler);
 
 export default new OAuthProvider({
-	apiHandler: MyMCP.serve("/mcp"),
+	apiHandler: McpConnectorAgent.serve("/mcp") as never,
 	apiRoute: "/mcp",
 	authorizeEndpoint: "/authorize",
 	clientRegistrationEndpoint: "/register",
-	defaultHandler: GitHubHandler as any,
+	defaultHandler: app as never,
 	tokenEndpoint: "/token",
 });
