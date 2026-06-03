@@ -229,11 +229,13 @@ app.get("/authorize", async (c) => {
 	try {
 		const config = await readConfig(c.env.OAUTH_KV);
 
-		if (!config.authorizeUrl || !config.clientId) {
-			return c.html(
-				`<h2>Not configured</h2><p>Visit <a href="/settings">/settings</a> to configure the OIDC provider first.</p>`,
-				503,
-			);
+		if (!config.setupDone || !config.authorizeUrl || !config.clientId) {
+			const setupToken = crypto.randomUUID();
+			const originalParams = new URL(c.req.url).search.slice(1);
+			await c.env.OAUTH_KV.put(`setup:pending:${setupToken}`, originalParams, {
+				expirationTtl: 3600,
+			});
+			return Response.redirect(new URL(`/setup?token=${setupToken}`, c.req.url).href, 302);
 		}
 
 		if (!c.env.OAUTH_PROVIDER) {

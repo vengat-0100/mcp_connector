@@ -4,8 +4,88 @@ import { renderSettingsPage, SECRET_PLACEHOLDER } from "./page";
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Optional password protection for /settings
-app.use("*", async (c, next) => {
+// /setup routes — no password, part of OAuth flow triggered by Claude.ai
+app.get("/setup", async (c) => {
+	const token = c.req.query("token") ?? "";
+	if (!token) return Response.redirect(new URL("/settings", c.req.url).href, 302);
+
+	const pending = await c.env.OAUTH_KV.get(`setup:pending:${token}`);
+	if (!pending) {
+		return c.html(
+			`<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:520px;margin:4rem auto;padding:0 1rem">
+			<h2>Setup link expired</h2>
+			<p>This setup link has expired or already been used. Please add the integration again in Claude.ai to start a new setup.</p>
+			</body></html>`,
+			410,
+		);
+	}
+
+	const config = await readConfig(c.env.OAUTH_KV);
+	const mcpUrl = new URL("/mcp", c.req.url).href;
+	return c.html(renderSettingsPage({ mcpUrl, config, setupToken: token }));
+});
+
+app.post("/setup", async (c) => {
+	const mcpUrl = new URL("/mcp", c.req.url).href;
+	const form = await c.req.formData();
+	const setupToken = (form.get("setupToken") as string) ?? "";
+	const existing = await readConfig(c.env.OAUTH_KV);
+
+	const rawSecret = (form.get("clientSecret") as string) ?? "";
+	const clientSecret = rawSecret === SECRET_PLACEHOLDER ? existing.clientSecret : rawSecret;
+
+	const updated: ConnectorConfig = {
+		siteUrl: ((form.get("siteUrl") as string) ?? "").trim(),
+		mcpEndpointUrl: ((form.get("mcpEndpointUrl") as string) ?? "").trim(),
+		idpName: ((form.get("idpName") as string) ?? "").trim(),
+		oidcIssuer: ((form.get("oidcIssuer") as string) ?? "").trim(),
+		authorizeUrl: ((form.get("authorizeUrl") as string) ?? "").trim(),
+		tokenUrl: ((form.get("tokenUrl") as string) ?? "").trim(),
+		userinfoUrl: ((form.get("userinfoUrl") as string) ?? "").trim(),
+		jwksUrl: ((form.get("jwksUrl") as string) ?? "").trim(),
+		clientId: ((form.get("clientId") as string) ?? "").trim(),
+		clientSecret,
+		scopes: ((form.get("scopes") as string) ?? "openid profile email").trim(),
+		setupDone: true,
+		savedAt: new Date().toISOString(),
+	};
+
+	const errors = validateConfig(updated);
+	if (errors.length > 0) {
+		return c.html(renderSettingsPage({ mcpUrl, config: updated, errors, setupToken }));
+	}
+
+	await writeConfig(c.env.OAUTH_KV, updated);
+
+	if (setupToken) {
+		const pending = await c.env.OAUTH_KV.get(`setup:pending:${setupToken}`);
+		if (pending) {
+			await c.env.OAUTH_KV.delete(`setup:pending:${setupToken}`);
+			return Response.redirect(new URL(`/authorize?${pending}`, c.req.url).href, 302);
+		}
+	}
+
+	return c.html(renderSettingsPage({ mcpUrl, config: updated, success: true }));
+});
+
+// Optional password protection for /settings (admin page only)
+app.use("/settings", async (c, next) => {
+	const password = c.env.SETTINGS_PASSWORD;
+	if (!password) return next();
+	const auth = c.req.header("Authorization") ?? "";
+	if (auth.startsWith("Basic ")) {
+		const decoded = atob(auth.slice(6));
+		const colon = decoded.indexOf(":");
+		const pass = colon >= 0 ? decoded.slice(colon + 1) : decoded;
+		if (pass === password) return next();
+	}
+	return new Response("Unauthorized", {
+		status: 401,
+		headers: { "WWW-Authenticate": 'Basic realm="MCP Connector Settings"', "Content-Type": "text/plain" },
+	});
+});
+
+app.use("/settings/test", async (c, next) => {
 	const password = c.env.SETTINGS_PASSWORD;
 	if (!password) return next();
 	const auth = c.req.header("Authorization") ?? "";

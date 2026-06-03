@@ -7,6 +7,7 @@ export interface PageOptions {
 	config: ConnectorConfig;
 	errors?: string[];
 	success?: boolean;
+	setupToken?: string;
 }
 
 function esc(s: string): string {
@@ -19,7 +20,9 @@ function esc(s: string): string {
 }
 
 export function renderSettingsPage(opts: PageOptions): string {
-	const { mcpUrl, config, errors = [], success = false } = opts;
+	const { mcpUrl, config, errors = [], success = false, setupToken } = opts;
+	const isSetupMode = !!setupToken;
+	const formAction = isSetupMode ? "/setup" : "/settings";
 	const secretValue = config.clientSecret ? SECRET_PLACEHOLDER : "";
 	const callbackUrl = mcpUrl.replace(/\/mcp$/, "/callback");
 
@@ -28,7 +31,7 @@ export function renderSettingsPage(opts: PageOptions): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MCP Connector — Settings</title>
+  <title>${isSetupMode ? "MCP Connector — First-time Setup" : "MCP Connector — Settings"}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #222; line-height: 1.5; }
@@ -73,8 +76,14 @@ export function renderSettingsPage(opts: PageOptions): string {
 </head>
 <body>
 <div class="container">
-  <h1>MCP Connector</h1>
-  <p class="subtitle">Configure your OIDC provider and target site below.</p>
+  <h1>MCP Connector${isSetupMode ? " — First-time Setup" : ""}</h1>
+  <p class="subtitle">${isSetupMode
+		? "Configure your IDP and Drupal site below. After saving, you will be redirected to authenticate."
+		: "Configure your OIDC provider and target site below."
+	}</p>
+  ${isSetupMode ? `<div class="banner" style="background:#f0f7ff;border:1px solid #bfdbfe;color:#1e40af;margin-bottom:1.5rem;padding:0.75rem 1rem;border-radius:6px;font-size:0.9rem">
+    <strong>Step 1 of 2:</strong> Fill in your configuration below, then click <strong>Save &amp; Authenticate</strong> to connect your IDP.
+  </div>` : ""}
 
   ${errors.length > 0 ? `
   <div class="banner banner-error">
@@ -107,7 +116,8 @@ export function renderSettingsPage(opts: PageOptions): string {
     </div>
   </div>
 
-  <form method="POST" action="/settings">
+  <form method="POST" action="${formAction}">
+    ${isSetupMode ? `<input type="hidden" name="setupToken" value="${esc(setupToken ?? "")}">` : ""}
 
     <!-- Target site -->
     <div class="card">
@@ -180,7 +190,7 @@ export function renderSettingsPage(opts: PageOptions): string {
     <!-- Actions -->
     <div class="card">
       <div class="actions-row">
-        <button type="submit" class="btn-primary">Save settings</button>
+        <button type="submit" class="btn-primary">${isSetupMode ? "Save &amp; Authenticate" : "Save settings"}</button>
         <button type="button" class="btn-test" onclick="testConnection()">Test connection</button>
       </div>
       <div id="test-results"></div>
